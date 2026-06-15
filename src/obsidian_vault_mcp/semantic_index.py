@@ -27,6 +27,22 @@ from . import config
 logger = logging.getLogger(__name__)
 
 
+def _embed_signature() -> str:
+    """Cache-compatibility signature: model name + fastembed version.
+
+    A fastembed upgrade can change pooling/behaviour (e.g. CLS vs mean) for
+    the *same* model name, which would make freshly-embedded queries
+    inconsistent with vectors cached under the old behaviour. Keying the
+    cache on this signature forces a clean rebuild on any such change.
+    """
+    try:
+        import fastembed
+        ver = getattr(fastembed, "__version__", "unknown")
+    except Exception:
+        ver = "unknown"
+    return f"{config.SEMANTIC_MODEL}|fastembed={ver}"
+
+
 def _split_into_chunks(rel_path: str, body: str) -> list[dict]:
     """Split a markdown body into section-level chunks.
 
@@ -306,8 +322,8 @@ class SemanticIndex:
                 return
             with open(self._cache_path, "rb") as fh:
                 data = pickle.load(fh)
-            if data.get("model") != config.SEMANTIC_MODEL:
-                return  # model changed -> rebuild from scratch
+            if data.get("embed_signature") != _embed_signature():
+                return  # model or fastembed behaviour changed -> rebuild from scratch
             self._meta = data["meta"]
             self._vectors = data["vectors"]
             self._file_mtimes = data.get("mtimes", {})
@@ -324,6 +340,7 @@ class SemanticIndex:
             with self._lock:
                 payload = {
                     "model": config.SEMANTIC_MODEL,
+                    "embed_signature": _embed_signature(),
                     "meta": self._meta,
                     "vectors": self._vectors,
                     "mtimes": self._file_mtimes,
