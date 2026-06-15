@@ -12,23 +12,73 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from . import config
 from .config import VAULT_MCP_PORT, VAULT_MCP_TOKEN, VAULT_PATH
 from .frontmatter_index import FrontmatterIndex
+from .semantic_index import SemanticIndex
 
 logger = logging.getLogger(__name__)
 
 # Global frontmatter index instance
 frontmatter_index = FrontmatterIndex()
+# Global semantic (vector) index instance
+semantic_index = SemanticIndex()
+
+
+_indexes_started = False
+
+
+def ensure_indexes_started() -> None:
+    """Start the frontmatter + semantic indexes exactly once.
+
+    NOTE: As of mcp >= 1.27, FastMCP.streamable_http_app() builds its own
+    Starlette app whose lifespan only runs the session manager -- the lifespan
+    passed to the FastMCP constructor is NOT invoked on the HTTP path. So we
+    start the indexes explicitly from main() instead of relying on lifespan.
+    This helper is idempotent so the (low-level) fallback path can also call it
+    without double-starting.
+    """
+    global _indexes_started
+    if _indexes_started:
+        return
+    _indexes_started = True
+
+    logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
+    try:
+        frontmatter_index.start()
+        logger.info(f"Frontmatter index built: {frontmatter_index.file_count} files indexed")
+    except Exception as e:
+        logger.warning(f"Frontmatter index could not start: {e}")
+
+    # Semantic index builds in a background thread; never blocks or crashes startup.
+    if config.SEMANTIC_ENABLED:
+        try:
+            semantic_index.start()
+            logger.info("Semantic index starting in background...")
+        except Exception as e:
+            logger.warning(f"Semantic index could not start: {e}")
+
+
+def stop_indexes() -> None:
+    try:
+        semantic_index.stop()
+    except Exception:
+        pass
+    try:
+        frontmatter_index.stop()
+    except Exception:
+        pass
 
 
 @asynccontextmanager
 async def lifespan(server):
-    """Start frontmatter index on server startup, stop on shutdown."""
-    logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
-    frontmatter_index.start()
-    logger.info(f"Frontmatter index built: {frontmatter_index.file_count} files indexed")
-    yield {"frontmatter_index": frontmatter_index}
-    frontmatter_index.stop()
+    """Start indexes on startup, stop on shutdown.
+
+    Kept for the low-level / stdio fallback path; idempotent via the helper.
+    """
+    ensure_indexes_started()
+    yield {"frontmatter_index": frontmatter_index, "semantic_index": semantic_index}
+    stop_indexes()
     logger.info("Vault MCP server shut down.")
 
 
@@ -44,6 +94,7 @@ mcp = FastMCP(
             "127.0.0.1:*",
             "localhost:*",
             "[::1]:*",
+            "brain.hermesx.uk",
             # Add your tunnel hostname here, e.g.:
             # "vault-mcp.example.com",
         ],
@@ -55,7 +106,12 @@ mcp = FastMCP(
 
 from .tools.read import vault_read as _vault_read, vault_batch_read as _vault_batch_read
 from .tools.write import vault_write as _vault_write, vault_batch_frontmatter_update as _vault_batch_frontmatter_update
-from .tools.search import vault_search as _vault_search, vault_search_frontmatter as _vault_search_frontmatter
+from .tools.search import (
+    vault_search as _vault_search,
+    vault_search_frontmatter as _vault_search_frontmatter,
+    vault_semantic_search as _vault_semantic_search,
+    vault_hybrid_search as _vault_hybrid_search,
+)
 from .tools.manage import vault_list as _vault_list, vault_move as _vault_move, vault_delete as _vault_delete
 from .models import (
     VaultReadInput,
@@ -149,6 +205,26 @@ def vault_search_frontmatter(
 
 
 @mcp.tool(
+    name="vault_semantic_search",
+    description="Search the vault by MEANING (vector/semantic search). Finds relevant notes even when they use different words or another language than the query (Bulgarian/English). Use when keyword search misses synonyms or paraphrases.",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
+def vault_semantic_search(query: str, path_prefix: str | None = None, max_results: int = 10) -> str:
+    """Semantic search over vault content."""
+    return _vault_semantic_search(query, path_prefix, max_results)
+
+
+@mcp.tool(
+    name="vault_hybrid_search",
+    description="Best general search: combines keyword (exact) and semantic (meaning) search with Reciprocal Rank Fusion. Prefer this over vault_search for most lookups. Falls back to keyword search if the semantic index is still building.",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+)
+def vault_hybrid_search(query: str, path_prefix: str | None = None, max_results: int = 10) -> str:
+    """Hybrid keyword + semantic search."""
+    return _vault_hybrid_search(query, path_prefix, max_results)
+
+
+@mcp.tool(
     name="vault_list",
     description="List directory contents in the vault. Supports recursion depth, file/dir filtering, and glob patterns. Excludes .obsidian, .trash, .git directories.",
     annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
@@ -216,15 +292,22 @@ def main():
         app.add_middleware(BearerAuthMiddleware)
         logger.info(f"Starting server on port {VAULT_MCP_PORT} with bearer auth + OAuth")
 
+        # mcp >= 1.27: streamable_http_app() does NOT run the constructor lifespan,
+        # so start the indexes explicitly here.
+        ensure_indexes_started()
+
         import uvicorn
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=VAULT_MCP_PORT,
-            log_level="info",
-            proxy_headers=True,
-            forwarded_allow_ips="*",
-        )
+        try:
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=VAULT_MCP_PORT,
+                log_level="info",
+                proxy_headers=True,
+                forwarded_allow_ips="*",
+            )
+        finally:
+            stop_indexes()
     except Exception as e:
         logger.warning(f"Could not build app ({e}), falling back to mcp.run()")
         logger.warning("Auth will NOT be enforced in this mode")
