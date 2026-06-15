@@ -96,3 +96,7 @@ def main() -> None:
     from .server import serve
 
     serve([SemanticSearchExtension()])
+
+
+if __name__ == "__main__":
+    main()
