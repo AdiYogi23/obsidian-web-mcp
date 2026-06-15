@@ -150,6 +150,18 @@ EXCLUDED_DIRS = {".obsidian", ".trash", ".git", ".DS_Store"}
 # Frontmatter index refresh interval (seconds)
 FRONTMATTER_INDEX_DEBOUNCE = 5.0
 
+# --- Semantic (vector) search ---
+# Multilingual model (Bulgarian + English in one space), 384-dim, CPU-friendly.
+SEMANTIC_MODEL = os.environ.get(
+    "SEMANTIC_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+# Set SEMANTIC_ENABLED=0 to skip building the vector index entirely.
+SEMANTIC_ENABLED = os.environ.get("SEMANTIC_ENABLED", "1") not in ("0", "false", "False")
+# Debounce for re-embedding changed files (seconds).
+SEMANTIC_INDEX_DEBOUNCE = 5.0
+# Reciprocal Rank Fusion constant for hybrid search.
+RRF_K = 60
+
 # Rate limiting (requests per minute) -- track in-memory, enforce per-token
 RATE_LIMIT_READ = 100
 RATE_LIMIT_WRITE = 30

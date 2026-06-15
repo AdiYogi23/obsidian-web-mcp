@@ -9,6 +9,8 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "pydantic>=2.0",
     "watchdog>=4.0.0",
+    "fastembed>=0.4.0",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +21,7 @@ dev = [
 
 [project.scripts]
 vault-mcp = "obsidian_vault_mcp.server:main"
+vault-mcp-semantic = "obsidian_vault_mcp.semantic_extension:main"
 
 [build-system]
 requires = ["hatchling"]
