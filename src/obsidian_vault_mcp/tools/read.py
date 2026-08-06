@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 def vault_read(path: str) -> str:
     """Read a file from the vault, returning content, metadata, and parsed frontmatter."""
     try:
-        resolved = resolve_vault_path(path)
-        content, metadata = read_file(path)
+        resolved = resolve_vault_path(path, allow_claude_skills=True)
+        content, metadata = read_file(path, allow_claude_skills=True)
 
         fm_data = None
         try:
@@ -47,7 +47,7 @@ def vault_batch_read(paths: list[str], include_content: bool = True) -> str:
 
     for path in paths:
         try:
-            content, metadata = read_file(path)
+            content, metadata = read_file(path, allow_claude_skills=True)
 
             fm_data = None
             try:

@@ -23,6 +23,7 @@ def vault_list(
             include_files=include_files,
             include_dirs=include_dirs,
             pattern=pattern,
+            allow_claude_skills=True,
         )
         return dumps({"items": items, "total": len(items)})
     except ValueError as e:

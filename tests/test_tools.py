@@ -253,6 +253,83 @@ def test_vault_list_returns_items(vault_dir):
     assert ".obsidian" not in names
 
 
+# --- .claude/skills read-only exception (2026-08-06) ---
+# Mirrors the T1-T8 manual verification matrix from the decision record.
+
+
+def test_T1_vault_read_claude_skills_allowed(vault_dir):
+    """T1: vault_read on .claude/skills/<skill>/SKILL.md succeeds."""
+    result = json.loads(vault_read(".claude/skills/sample-skill/SKILL.md"))
+    assert "error" not in result
+    assert "sample-skill" in result["content"]
+
+
+def test_T2_vault_list_claude_skills_allowed(vault_dir):
+    """T2: vault_list on .claude/skills/ succeeds and shows the skill folder."""
+    result = json.loads(vault_list(".claude/skills", depth=2))
+    assert "error" not in result
+    names = [item["name"] for item in result["items"]]
+    assert "sample-skill" in names
+
+
+def test_T3_vault_read_claude_settings_rejected(vault_dir):
+    """T3: vault_read on .claude/settings.local.json is refused."""
+    result = json.loads(vault_read(".claude/settings.local.json"))
+    assert "error" in result
+    assert "hidden" in result["error"] or "starts with" in result["error"]
+
+
+def test_T4_vault_read_git_config_rejected(vault_dir):
+    """T4: vault_read on .git/config is refused."""
+    result = json.loads(vault_read(".git/config"))
+    assert "error" in result
+
+
+def test_T5_vault_read_claude_skills_traversal_rejected(vault_dir):
+    """T5: .claude/../.git/config is refused (traversal, not the skills path)."""
+    result = json.loads(vault_read(".claude/../.git/config"))
+    assert "error" in result
+
+
+def test_T6_vault_read_outside_vault_traversal_rejected(vault_dir):
+    """T6: a .. escape toward the OS drive is refused."""
+    result = json.loads(vault_read("../../Windows/System32/drivers/etc/hosts"))
+    assert "error" in result
+
+
+def test_T7_vault_write_claude_skills_rejected(vault_dir):
+    """T7: vault_write into .claude/skills/ is refused -- read-only exception only."""
+    result = json.loads(vault_write(".claude/skills/test.md", "should never land"))
+    assert "error" in result
+    assert not (vault_dir / ".claude" / "skills" / "test.md").exists()
+
+
+def test_T8_vault_read_regular_content_unaffected(vault_dir):
+    """T8 (regression): ordinary vault content still reads normally."""
+    result = json.loads(vault_read("test-note.md"))
+    assert "error" not in result
+    assert "test note" in result["content"]
+
+
+def test_vault_batch_read_claude_skills_allowed(vault_dir):
+    """vault_batch_read also honors the read-only .claude/skills exception."""
+    result = json.loads(vault_batch_read([
+        ".claude/skills/sample-skill/SKILL.md",
+        "test-note.md",
+    ]))
+    assert result["found"] == 2
+    assert result["missing"] == 0
+
+
+def test_vault_edit_claude_skills_rejected(vault_dir):
+    """vault_edit (a write tool) is not granted the read-only exception."""
+    result = json.loads(vault_edit(
+        ".claude/skills/sample-skill/SKILL.md",
+        [{"old_text": "Sample", "new_text": "Changed"}],
+    ))
+    assert "error" in result
+
+
 def test_vault_delete_requires_confirm(vault_dir):
     """vault_delete without confirm=true returns error."""
     vault_write("delete-me.md", "temp content")

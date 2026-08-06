@@ -10,18 +10,41 @@ from pathlib import Path
 from . import config
 
 
-def resolve_vault_path(relative_path: str) -> Path:
+# Narrow, read-only exception (2026-08-06): skills are canon and the planning
+# layer needs to read them, but nothing else under a dot-prefixed path should
+# open up. Only the leading `.claude/skills` components are ever exempted --
+# see resolve_vault_path's allow_claude_skills parameter.
+_CLAUDE_SKILLS_PREFIX = (".claude", "skills")
+
+
+def resolve_vault_path(relative_path: str, allow_claude_skills: bool = False) -> Path:
     """Resolve a relative path against the vault root, with safety checks.
 
     Raises ValueError if the path escapes the vault, contains null bytes,
     or touches dotfile/dot-directory components.
+
+    allow_claude_skills: when True, a path whose leading components are
+    exactly `.claude/skills` (any separator; pathlib splits both) is exempt
+    from the dot-prefix check for THOSE two components only. Every other
+    dot-prefixed component -- including one nested inside a skill folder
+    (`.claude/skills/x/.git/...`), a `..` traversal segment, or `.claude`
+    used for anything other than `skills/` -- is still rejected below.
+    Callers pass this only from the three read-only tools (vault_read,
+    vault_batch_read via read_file, vault_list via list_directory); it must
+    never reach a write path (write_file_atomic, move_path, delete_path take
+    no such parameter at all).
     """
     if "\x00" in relative_path:
         raise ValueError("Path contains null bytes")
 
     # Check for dot-prefixed components (blocks .obsidian, .trash, dotfiles)
     parts = Path(relative_path).parts
-    for part in parts:
+
+    skip = 0
+    if allow_claude_skills and parts[: len(_CLAUDE_SKILLS_PREFIX)] == _CLAUDE_SKILLS_PREFIX:
+        skip = len(_CLAUDE_SKILLS_PREFIX)
+
+    for part in parts[skip:]:
         if part.startswith("."):
             raise ValueError(
                 f"Path component '{part}' starts with '.'; dotfiles and hidden directories are not allowed"
@@ -41,12 +64,13 @@ def _iso_timestamp(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
-def read_file(relative_path: str) -> tuple[str, dict]:
+def read_file(relative_path: str, allow_claude_skills: bool = False) -> tuple[str, dict]:
     """Read a file and return (content, metadata).
 
     Metadata keys: size (int), modified (ISO str), created (ISO str).
+    allow_claude_skills: see resolve_vault_path.
     """
-    path = resolve_vault_path(relative_path)
+    path = resolve_vault_path(relative_path, allow_claude_skills=allow_claude_skills)
 
     if not path.is_file():
         raise FileNotFoundError(f"Not a file: {relative_path}")
@@ -157,15 +181,19 @@ def list_directory(
     include_files: bool = True,
     include_dirs: bool = True,
     pattern: str | None = None,
+    allow_claude_skills: bool = False,
 ) -> list[dict]:
     """List directory contents recursively up to *depth* levels.
 
     Returns a list of dicts with keys: name, path (relative to vault),
     type ("file" or "dir"), size, modified.
+    allow_claude_skills: see resolve_vault_path. Only applies to the root
+    of this listing -- recursion below it walks the filesystem directly and
+    never re-enters resolve_vault_path, so it is unaffected either way.
     """
     depth = min(depth, config.MAX_LIST_DEPTH)
 
-    root = resolve_vault_path(relative_path)
+    root = resolve_vault_path(relative_path, allow_claude_skills=allow_claude_skills)
     if not root.is_dir():
         raise NotADirectoryError(f"Not a directory: {relative_path}")
 

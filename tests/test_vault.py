@@ -38,6 +38,79 @@ def test_resolve_null_byte_rejected(vault_dir):
         resolve_vault_path("test\x00note.md")
 
 
+# --- .claude/skills read-only exception (2026-08-06) ---
+
+
+def test_resolve_claude_skills_blocked_by_default(vault_dir):
+    """Without the flag, .claude/skills is rejected exactly like any dotfile."""
+    with pytest.raises(ValueError, match="hidden"):
+        resolve_vault_path(".claude/skills/sample-skill/SKILL.md")
+
+
+def test_resolve_claude_skills_allowed_with_flag(vault_dir):
+    """With allow_claude_skills=True, a path under .claude/skills resolves."""
+    result = resolve_vault_path(
+        ".claude/skills/sample-skill/SKILL.md", allow_claude_skills=True
+    )
+    assert result.exists()
+    assert result.name == "SKILL.md"
+
+
+def test_resolve_claude_skills_directory_itself_allowed_with_flag(vault_dir):
+    """The bare .claude/skills directory (no trailing path) also resolves."""
+    result = resolve_vault_path(".claude/skills", allow_claude_skills=True)
+    assert result.is_dir()
+
+
+def test_resolve_claude_settings_rejected_even_with_flag(vault_dir):
+    """.claude/settings.local.json stays blocked -- the exception is skills/ only."""
+    with pytest.raises(ValueError, match="hidden"):
+        resolve_vault_path(".claude/settings.local.json", allow_claude_skills=True)
+
+
+def test_resolve_claude_bare_rejected_even_with_flag(vault_dir):
+    """Bare .claude (not under skills/) stays blocked."""
+    with pytest.raises(ValueError, match="hidden"):
+        resolve_vault_path(".claude", allow_claude_skills=True)
+
+
+def test_resolve_git_rejected_even_with_flag(vault_dir):
+    """.git stays blocked regardless of the flag -- unrelated to .claude/skills."""
+    with pytest.raises(ValueError, match="hidden"):
+        resolve_vault_path(".git/config", allow_claude_skills=True)
+
+
+def test_resolve_claude_skills_traversal_still_rejected_with_flag(vault_dir):
+    """A .. segment after the exempted prefix is still caught by the dot check."""
+    with pytest.raises(ValueError):
+        resolve_vault_path(
+            ".claude/skills/../../.git/config", allow_claude_skills=True
+        )
+
+
+def test_resolve_dotdot_rejected_even_with_flag(vault_dir):
+    """Plain traversal outside the vault stays rejected regardless of the flag."""
+    with pytest.raises(ValueError):
+        resolve_vault_path("../../etc/passwd", allow_claude_skills=True)
+
+
+def test_list_directory_claude_skills_allowed_with_flag(vault_dir):
+    """list_directory can enumerate .claude/skills when the flag is set."""
+    items = list_directory(".claude/skills", depth=2, allow_claude_skills=True)
+    names = [item["name"] for item in items]
+    assert "sample-skill" in names
+    assert "SKILL.md" in names
+
+
+def test_read_file_claude_skills_allowed_with_flag(vault_dir):
+    """read_file can read a skill file when the flag is set."""
+    content, metadata = read_file(
+        ".claude/skills/sample-skill/SKILL.md", allow_claude_skills=True
+    )
+    assert "sample-skill" in content
+    assert metadata["size"] > 0
+
+
 def test_read_file(vault_dir):
     """Read a file, verify content and metadata."""
     content, metadata = read_file("test-note.md")

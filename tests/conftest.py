@@ -33,6 +33,19 @@ def vault_dir(tmp_path, monkeypatch):
     obsidian_dir.mkdir()
     (obsidian_dir / "config.json").write_text('{"theme": "dark"}')
 
+    # .claude/skills/<skill>/SKILL.md (read-only exception target, 2026-08-06)
+    skill_dir = vault / ".claude" / "skills" / "sample-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: sample-skill\n---\n\nSample skill body.\n")
+
+    # .claude/settings.local.json (must stay blocked -- .claude outside skills/)
+    (vault / ".claude" / "settings.local.json").write_text('{"token": "secret"}')
+
+    # .git/config (must stay blocked, unrelated to the skills exception)
+    git_dir = vault / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("[core]\n\trepositoryformatversion = 0\n")
+
     # Set environment variable for config module
     monkeypatch.setenv("VAULT_PATH", str(vault))
     monkeypatch.setenv("VAULT_MCP_TOKEN", "test-token-12345")
