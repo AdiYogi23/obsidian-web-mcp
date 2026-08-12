@@ -411,3 +411,24 @@ class VaultDailyNoteAppendInput(BaseModel):
         description="Content to append to today's daily note (the note is created from the template if missing)",
         max_length=MAX_CONTENT_SIZE,
     )
+
+
+class VaultGitCommitInput(BaseModel):
+    """Stage named vault paths, commit, and push to origin main."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    paths: list[str] = Field(
+        ...,
+        description="Relative paths from vault root to stage, named explicitly -- no wildcard/add-all shortcuts",
+        min_length=1,
+    )
+    message: str = Field(
+        ...,
+        description="Commit message",
+        min_length=1,
+    )
+    push: bool = Field(
+        default=True,
+        description="Push to origin main after committing",
+    )

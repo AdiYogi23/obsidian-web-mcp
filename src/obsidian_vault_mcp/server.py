@@ -129,6 +129,7 @@ from .tools.write import (
 )
 from .tools.search import vault_search as _vault_search, vault_search_frontmatter as _vault_search_frontmatter
 from .tools.manage import vault_list as _vault_list, vault_move as _vault_move, vault_delete as _vault_delete
+from .tools.git_ops import vault_git_commit as _vault_git_commit
 from .tools.canvas import (
     vault_canvas_read as _vault_canvas_read,
     vault_canvas_add_node as _vault_canvas_add_node,
@@ -155,6 +156,7 @@ from .models import (
     VaultCanvasAddNodeInput,
     VaultCanvasAddEdgeInput,
     VaultDailyNoteAppendInput,
+    VaultGitCommitInput,
 )
 
 
@@ -376,6 +378,21 @@ def vault_daily_note_append(content: str) -> str:
     """Append to today's daily note."""
     inp = VaultDailyNoteAppendInput(content=content)
     return _vault_daily_note_append(inp.content)
+
+
+@mcp.tool(
+    name="vault_git_commit",
+    description=(
+        "Stage explicitly named vault paths, commit, and push to origin main -- so Claude on claude.ai "
+        "can commit its own vault writes without a separate Claude Code step. Refuses wildcard/add-all "
+        "paths, paths outside the vault, an empty message, an empty stage, and a non-AdiYogi23 origin."
+    ),
+    annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
+)
+def vault_git_commit(paths: list[str], message: str, push: bool = True) -> str:
+    """Commit (and optionally push) explicitly named vault paths."""
+    inp = VaultGitCommitInput(paths=paths, message=message, push=push)
+    return _vault_git_commit(inp.paths, inp.message, inp.push)
 
 
 def build_app(extensions=()):
